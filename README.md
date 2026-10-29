@@ -1,8 +1,8 @@
 # Limit Order Book & Market-Making Simulator
 
-**C++20 matching engine | Synthetic market-making research | Python statistical analysis**
+**C++ matching engine | Synthetic market-making research | Python statistical analysis**
 
-A single-threaded, price-time-priority limit order book (LOB) in C++20, extended with a market-making simulator that submits orders to the *actual matching engine*. The project studies two connected problems: **efficient and correct order matching**, and **how inventory-aware quoting affects risk and profit** in a controlled synthetic market.
+A single-threaded, price-time-priority limit order book (LOB) in C++, extended with a market-making simulator that submits orders to the *actual matching engine*. The project studies two connected problems: **efficient and correct order matching**, and **how inventory-aware quoting affects risk and profit** in a controlled synthetic market.
 
 > **Research scope:** This is an educational synthetic simulation, **not** historical-data backtesting or live trading. PnL values use **tick-lots**, not dollars or rupees. Local performance measurements are workload- and hardware-dependent.
 
@@ -56,7 +56,7 @@ Risk controls include per-run inventory limits, maker/taker fees, and forced ter
 
 ## Build and run
 
-**Requirements:** Windows PowerShell, a **C++20-capable GCC** (the scripts prefer `C:\msys64\ucrt64\bin\g++.exe`), and Python 3 for Python tests and reports. Install `matplotlib` for the study plots:
+**Requirements:** Windows PowerShell, a **GCC toolchain compatible with the included build scripts** (the scripts prefer `C:\msys64\ucrt64\bin\g++.exe`), and Python 3 for Python tests and reports. Install `matplotlib` for the study plots:
 
 ```powershell
 python -m pip install -r simulation/requirements.txt
@@ -92,7 +92,7 @@ The `build.ps1 -Target diff` target runs **25,000 operations with seed 42**. For
 .\bin\diff_test.exe 100000 42
 ```
 
-This 100,000-operation command is an **optional additional test**, not a claim that it was run in the latest supplied logs.
+The **100,000-operation differential test passed on October 29, 2026** (seed 42), with no mismatches against the reference implementation. The build script's default `diff` target still runs 25,000 operations.
 
 The study saves outputs under the locally generated `results/study/` folder, including `runs.csv`, `paired_comparisons.csv`, `aggregate.csv`, `RESULTS.md`, images, and `report.html`. Generated results are ignored by Git and **not included in the repository**; run the study to view them. The report can be regenerated from existing outputs:
 
@@ -113,7 +113,7 @@ See [Study Guide](docs/STUDY_GUIDE.md) for the model, parameters, event sequence
 | Test | Coverage | Latest user-run result (Oct 29, 2026) |
 | --- | --- | --- |
 | [C++ unit tests](tests/UnitTests.cpp) | Memory pool, intrusive list, FIFO, sweeps, cancellation, modification safety, rejects, sparse bitset | **8/8 groups passed** |
-| [Differential test](tests/DifferentialTest.cpp) | Optimized engine vs. independent `std::map` reference; invalid inputs and deep-book state | **25,000 operations passed (seed 42)** |
+| [Differential test](tests/DifferentialTest.cpp) | Optimized engine vs. independent `std::map` reference; invalid inputs and deep-book state | **100,000 operations passed (seed 42)** |
 | [Market-making tests](tests/MarketMakingTests.cpp) | Quote policies, ledger accounting, FIFO/IOC, caps/liquidation, markouts, determinism, edge cases | **8/8 groups passed** |
 | [Python tests](tests/test_simulation.py) | CLI validation, deterministic files, ledger reconciliation, study-shape and audit-tampering checks | **3 tests passed** |
 | [Full study](simulation/run_study.py) | Synthetic comparisons and sensitivity runs | **576/576 simulations completed** |
