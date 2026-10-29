@@ -1,167 +1,172 @@
-# Ultra-Low-Latency Limit Order Book & Matching Engine (C++20)
+# Limit Order Book & Market-Making Simulator
 
-## Market-making research extension
+**C++20 matching engine | Synthetic market-making research | Python statistical analysis**
 
-A C++ / Python simulator now uses this engine's actual FIFO fills:
-fixed-spread, inventory-skewed and Avellaneda-Stoikov-inspired policies; position caps;
-fees and end liquidation; synthetic Poisson flow; informed-flow stress; reproducible comparisons.
+A single-threaded, price-time-priority limit order book (LOB) in C++20, extended with a market-making simulator that submits orders to the *actual matching engine*. The project studies two connected problems: **efficient and correct order matching**, and **how inventory-aware quoting affects risk and profit** in a controlled synthetic market.
 
-**Start with [the study guide](docs/STUDY_GUIDE.md).**
-Run one simulation: .\run-simulation.ps1 -Mode single
-Run the grid and report: .\run-simulation.ps1 -Mode study
-Run new tests: .\run-simulation.ps1 -Mode test
+> **Research scope:** This is an educational synthetic simulation, **not** historical-data backtesting or live trading. PnL values use **tick-lots**, not dollars or rupees. Local performance measurements are workload- and hardware-dependent.
 
-The delivered report is [results/study/report.html](results/study/report.html).
-This is an educational synthetic study, not a historical backtest or live trading system.
-The original engine is unchanged. [Implementation details](docs/IMPLEMENTATION.md).
+## Highlights
 
+- **Matching engine:** limit/market orders, cancel/modify, partial fills, multi-level sweeps, FIFO within each price level, and integer-tick prices.
+- **Data structures:** direct array-indexed price levels, intrusive doubly-linked FIFO queues, pooled orders, average O(1) order-ID hash lookup, and occupancy-bitset scanning to locate nonempty levels.
+- **Market-making strategies:** fixed-spread, inventory-skew, and Avellaneda–Stoikov-inspired quoting with inventory caps, modeled fees, and terminal liquidation.
+- **Synthetic market:** seeded Brownian reference-price shocks, Poisson arrivals on a fixed time grid, background liquidity, and informed-flow stress tests.
+- **Research outputs:** fill ledgers, inventory/equity paths, net PnL, drawdown, adverse-selection markouts, bootstrap confidence intervals, and HTML plots.
 
-A high-frequency trading (HFT) matching engine built in modern C++20 with **Price-Time Priority (FIFO)**, direct **array-indexed price levels**, **intrusive doubly-linked queues**, and a **pre-allocated pool allocator** to eliminate heap allocations on the critical path.
+## Architecture
 
----
-
-## ⚡ Performance Highlights (Calibrated CPU RDTSC @ 2.5 GHz)
-
-| Metric | Result |
-| :--- | :--- |
-| **Sustained Throughput (Mixed Trading)** | **13.1+ Million ops/second (76.3 ns / op)** |
-| **Sustained Throughput (Passive Influx)** | **12.9+ Million orders/second (77.3 ns / order)** |
-| **Passive Limit Order Insertion (P50 / P99)** | **32.4 ns / 213.9 ns** |
-| **Aggressive Trade Execution (P50 / P99)** | **67.3 ns / 487.9 ns** |
-| **O(1) Live Order Cancellation (P50 / P99)** | **33.2 ns / 162.2 ns** |
-| **Differential Fuzzing Verification** | **100% Match vs Reference Oracle (Trades, Depth, & Invalids)** |
-
----
-
-## 📁 Repository Structure
-
-```
-lob+matchingengine/
-├── .gitignore                           # Git ignore rules for build artifacts and binaries
-├── build.ps1                            # Standalone C++20 build runner & CLI launcher
-├── README.md                            # Comprehensive architectural documentation
-├── include/
-│   └── matching_engine/
-│       ├── Types.hpp                    # Core types: OrderId, Price (ticks), Quantity, Side, ExecutionReport
-│       ├── IntrusiveList.hpp            # Zero-allocation intrusive doubly-linked list for FIFO queues
-│       ├── MemoryPool.hpp               # Cache-aligned (64B) block pool allocator using std::align_val_t
-│       ├── Order.hpp                    # Cache-aligned (64B) order struct with intrusive node hooks
-│       ├── PriceLevel.hpp               # Aggregated level volume, order count, and FIFO order list
-│       ├── OrderBook.hpp                # Direct array-indexed ladder with 64-bit word bitset skip scanning
-│       ├── MatchingEngine.hpp           # Price-Time priority engine with templated aggressive matching
-│       └── ReferenceEngine.hpp          # Canonical std::map reference engine used as fuzzing oracle
-├── src/
-│   ├── OrderBook.cpp                    # Array indexing, bitset bounds tracking, and depth management
-│   ├── MatchingEngine.cpp               # Templated Limit, Market, Cancel, and Modify matching pipelines
-│   ├── ReferenceEngine.cpp              # Canonical reference implementation with deep ladder queries
-│   └── main.cpp                         # Interactive visual CLI order book and trading command REPL
-├── tests/
-│   ├── UnitTests.cpp                    # Unit tests with non-suppressible CHECK assertions
-│   └── DifferentialTest.cpp             # Randomized fuzzer with invalid input & deep ladder verification
-└── benchmarks/
-    ├── LatencyHistogram.hpp             # RDTSC cycle timer with CPU calibration and statistical percentiles
-    └── BenchmarkEngine.cpp              # Multi-workload throughput & sub-nanosecond latency benchmarks
+```text
+Synthetic price changes + incoming order flow (seeded)
+                        |
+               Quoting strategy
+           fixed / inventory / A-S
+                        |
+         C++ MatchingEngine and OrderBook
+      FIFO fills / order lifecycle / BBO
+                        |
+             Fill & accounting ledger
+           cash / inventory / fees
+                        |
+          Python audits and comparisons
+           CSV / charts / HTML report
 ```
 
----
+### Matching engine
 
-## 🏗️ Core Architectural Design
+The core engine handles order placement, cancellation, market orders, and modifications. Orders at better prices execute first; at the same price, resting orders execute FIFO. Decreasing an order's remaining quantity keeps its existing priority, while increasing quantity or changing price forfeits priority. Invalid modifications are rejected without deleting the existing resting order.
 
-### 1. Pre-Allocated 64-Byte Aligned Memory Pool (`MemoryPool.hpp`)
-Standard implementations invoke `new`/`malloc` on every incoming order. In high-frequency environments, dynamic heap allocations introduce unpredictable latency spikes (OS locks, page faults, memory fragmentation).
-- Pre-allocates a contiguous memory region for 1,000,000+ orders upfront.
-- Uses `std::align_val_t{64}` to guarantee true 64-byte cache line alignment for each `Order`.
-- Employs a cache-warm LIFO free list for true $O(1)$ allocation and deallocation without heap syscalls.
+**Complexity:** accessing a configured price level is O(1); intrusive-queue unlinking is O(1); order-ID hash lookups are *average* O(1). Finding the next nonempty best price can require bitmap scanning, so not every operation is worst-case O(1). The single-threaded engine uses a fixed configured price ladder and order pool.
 
-### 2. Intrusive Doubly-Linked Queues (`IntrusiveList.hpp`)
-Instead of `std::list<Order*>` or `std::deque` which allocate independent node wrappers:
-- `Order` inherits directly from `IntrusiveNode<Order>`, embedding `prev` and `next` pointers within the order itself.
-- Orders are enqueued and removed in $O(1)$ with zero pointer hops and high cache locality.
+### Market-making simulator
 
-### 3. Array-Indexed Ladder with 64-Bit Word Bitset (`OrderBook.hpp`)
-Traditional order books use Red-Black trees (`std::map`), which require $O(\log N)$ tree traversal and suffer pointer chasing across fragmented heap memory.
-- Price levels are mapped using direct array offset: $\text{Index} = \text{Price} - \text{MinPrice}$.
-- Provides genuine $O(1)$ direct cache-friendly array access to any price tick.
-- **Hierarchical 64-bit word bitmaps**: When tracking the Best Bid and Best Ask across sparse books, the engine scans non-empty levels using `std::countl_zero` / `std::countr_zero` CPU instructions, skipping 64 empty price levels in a single clock cycle.
+The simulation constructs synthetic external events before comparing strategies. For a given seed and scenario, policies receive the same underlying price innovations and incoming-order tape, although their actual fills differ with their quotes. Background competitors enter before strategy quotes at the same price, preserving FIFO priority. Incoming marketable limit orders have unfilled remainders canceled (IOC-like behavior).
 
-### 4. Single-Threaded Deterministic Architecture
-- The matching engine is deliberately single-threaded by design (the standard architecture for tier-1 exchange matching cores like CME and NASDAQ).
-- Eliminates mutex contention, atomic bus locking, and inter-core cache line bouncing. Orders are processed in strict, deterministic arrival order.
+Each policy adjusts bid/ask quotes on a fixed decision grid:
 
-### 5. Order Priority Preservation Rules
-- **Quantity Decreases**: An order reducing its quantity preserves its existing queue priority position.
-- **Quantity Increases or Price Changes**: The order loses queue priority and is re-queued at the tail of the new price level (or matched aggressively if crossing).
-- **Safety**: Modifying an order with invalid parameters (e.g. out of range price or 0 quantity) immediately rejects the request without affecting or destroying the resting order.
+| Policy | Quoting rule |
+| --- | --- |
+| Fixed spread | Symmetric prices around the observable reference |
+| Inventory skew | Shift both quotes away from accumulating more of the current position |
+| A-S inspired | Reservation-price and spread adjustments using inventory, volatility, and a bounded risk horizon |
 
----
+The A-S-inspired formula is **not** calibrated to the simulation's actual arrival/fill law and is not claimed optimal.
 
-## 🔬 Testing & Verification
+Risk controls include per-run inventory limits, maker/taker fees, and forced terminal liquidation against modeled depth. The model has no exchange connectivity, historical market calibration, realistic latency, market impact, or adaptive competitor.
 
-### Unit Testing (`tests/UnitTests.cpp`)
-Covers critical low-level primitives and high-level matching rules:
-1. `MemoryPool`: Slot re-use, exhaustion detection, and in-place construction.
-2. `IntrusiveList`: Head, middle, tail removals, and FIFO queue iteration.
-3. `PriceTimePriorityFIFO`: Strict price-time order fills under matching pressure.
-4. `MarketOrderSweeps`: Multi-level depth sweep until filled.
-5. `OrderCancelAndModify`: Queue priority preservation and cancellations.
+## Build and run
 
-### Randomized Differential Fuzzing (`tests/DifferentialTest.cpp`)
-To guarantee correctness, orders are fuzzed across a randomized stream of operations comparing the optimized engine against `ReferenceEngine` (built with `std::map` and `std::list`):
-- Generates 25,000+ randomized limit, market, cancel, and modify operations.
-- Asserts identical trade execution reports (maker, taker, price, quantity) after each operation.
-- Validates identical Top-of-Book (Best Bid & Best Ask) states throughout the run.
-
----
-
-## 🚀 Build and Run
-
-The project has **zero external dependencies** and does not require CMake. You can build and run everything with the standalone PowerShell runner ([build.ps1](file:///c:/Users/lodha/OneDrive/Documents/lob+matchingengine/build.ps1)) or directly with `g++`.
-
-### 1. Interactive Trading Terminal & CLI Commands
+**Requirements:** Windows PowerShell, a **C++20-capable GCC** (the scripts prefer `C:\msys64\ucrt64\bin\g++.exe`), and Python 3 for Python tests and reports. Install `matplotlib` for the study plots:
 
 ```powershell
-# Launch the Interactive Trading Terminal (REPL prompt: lob>)
+python -m pip install -r simulation/requirements.txt
+```
+
+From the repository root:
+
+```powershell
+# C++ engine CLI, guided demo and original tests
 .\build.ps1 -Target engine
-
-# Or run orders directly via command-line arguments:
-.\bin\engine.exe limit buy 100 50 101       # Place Limit Buy Order #101: 50 @ 100 ticks
-.\bin\engine.exe limit sell 105 25 201      # Place Limit Sell Order #201: 25 @ 105 ticks
-.\bin\engine.exe market buy 30 301          # Aggressive Market Buy: 30 shares
-.\bin\engine.exe modify 101 99 40           # Modify Order #101 (Qty: 40 @ Price: 99)
-.\bin\engine.exe cancel 101                 # Cancel Order #101
-.\bin\engine.exe book 10                    # Print top 10 depth levels
-.\bin\engine.exe demo                       # Run full 5-step guided walkthrough
-.\bin\engine.exe help                       # Print trading command cheat-sheet
-```
-
----
-
-### 2. Testing and Benchmarks
-
-```powershell
-# 1. Run the guided walkthrough demonstration
 .\build.ps1 -Target demo
-
-# 2. Run comprehensive unit tests
 .\build.ps1 -Target test
-
-# 3. Run randomized differential testing against oracle (25,000 ops)
 .\build.ps1 -Target diff
-
-# 4. Run low-latency and throughput benchmarks
 .\build.ps1 -Target bench
 
-# 5. Compile all binaries into bin/
-.\build.ps1 -Target all
+# Simulator and its tests
+.\run-simulation.ps1 -Mode single -Strategy inventory -Seconds 120 -Seed 1
+.\run-simulation.ps1 -Mode test
+.\run-simulation.ps1 -Mode study -Seeds 12 -Seconds 120
 ```
+
+If running from **Windows CMD** instead of PowerShell, use:
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Target test
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run-simulation.ps1 -Mode test
+```
+
+The `build.ps1 -Target diff` target runs **25,000 operations with seed 42**. For a larger differential test, compile the binary first and run it explicitly:
+
+```powershell
+.\build.ps1 -Target diff
+.\bin\diff_test.exe 100000 42
+```
+
+This 100,000-operation command is an **optional additional test**, not a claim that it was run in the latest supplied logs.
+
+The study saves outputs under the locally generated `results/study/` folder, including `runs.csv`, `paired_comparisons.csv`, `aggregate.csv`, `RESULTS.md`, images, and `report.html`. Generated results are ignored by Git and **not included in the repository**; run the study to view them. The report can be regenerated from existing outputs:
+
+```powershell
+python simulation/run_study.py --report-only --output results/study
+```
+
+For fresh-seed validation after selecting a hypothesis:
+
+```powershell
+python simulation/run_study.py --seed 1001 --seeds 20 --output results/validation
+```
+
+See [Study Guide](docs/STUDY_GUIDE.md) for the model, parameters, event sequence, accounting, and interpretation.
+
+## Tests and validation
+
+| Test | Coverage | Latest user-run result (Oct 29, 2026) |
+| --- | --- | --- |
+| [C++ unit tests](tests/UnitTests.cpp) | Memory pool, intrusive list, FIFO, sweeps, cancellation, modification safety, rejects, sparse bitset | **8/8 groups passed** |
+| [Differential test](tests/DifferentialTest.cpp) | Optimized engine vs. independent `std::map` reference; invalid inputs and deep-book state | **25,000 operations passed (seed 42)** |
+| [Market-making tests](tests/MarketMakingTests.cpp) | Quote policies, ledger accounting, FIFO/IOC, caps/liquidation, markouts, determinism, edge cases | **8/8 groups passed** |
+| [Python tests](tests/test_simulation.py) | CLI validation, deterministic files, ledger reconciliation, study-shape and audit-tampering checks | **3 tests passed** |
+| [Full study](simulation/run_study.py) | Synthetic comparisons and sensitivity runs | **576/576 simulations completed** |
+
+These results were supplied from a local Windows run; this README change did **not** independently execute the C++ binaries. Passing tests supports correctness on covered cases, not absence of all bugs.
+
+## Experiment design and findings
+
+The default study executes **576 synthetic runs**:
+
+- **144 comparisons:** 4 regimes (quiet, normal, volatile, informed) × 3 strategies × 12 seeds.
+- **432 parameter sweeps:** 2 regimes (volatile, informed) × 2 policies (fixed, inventory skew) × 3 quote half-spreads × 3 quote sizes × 12 seeds.
+- Default run length: **120 simulated seconds**; time step **0.1 second**.
+- Paired strategy comparisons use the same seed, with **3,000 bootstrap resamples** for approximate 95% intervals.
+
+The [study guide](docs/STUDY_GUIDE.md) records these **normal-volatility scenario** findings for the default configuration:
+
+| Metric | Fixed spread | Inventory skew |
+| --- | ---: | ---: |
+| Mean net PnL (tick-lots) | 4,518.84 | 3,959.60 |
+| Mean sampled inventory variance (lots²) | 495.63 | 39.32 |
+| Mean sampled max drawdown (tick-lots) | 339.00 | 34.70 |
+
+Inventory skew reduced mean sampled inventory variance by approximately **92.1%**, with approximately **12.4% lower mean net PnL**. The paired mean PnL difference was **−559.24 tick-lots**, with an approximate bootstrap 95% interval of **−873.3 to −235.7 tick-lots**. These are documented outputs from the **synthetic study**, not independently verified market results. Confidence intervals represent variability across synthetic seeds, **not uncertainty about model realism**.
+
+Fill ledgers are reconciled against cash, fees, inventory and final liquidation. Reported adverse selection uses a one-second signed reference-price markout; end-horizon marks are censored and counted separately. The ratio called `step_sharpe` is **not annualized** and is not a live trading Sharpe.
+
+## Benchmarking
+
+The [C++ benchmark](benchmarks/BenchmarkEngine.cpp) includes passive insertion, aggressive matching, live-order cancellation, and mixed-workload throughput with cycle-based timing. Prior local measurements were **over 10 million operations per second** for a mixed workload, but they were not rerun as part of this documentation update. Treat the results as machine-specific; record the CPU, compiler, build flags, workload, P50/P99/P99.9, and repeated runs before making performance comparisons.
+
+## Repository map
+
+```text
+benchmarks/                Timing utilities and matching-engine benchmark
+docs/                      Implementation notes and detailed study guide
+include/matching_engine/   Orders, price ladder, queues, memory pool, engine
+include/market_making/     Simulator interface and configuration
+src/                       Engine implementations, simulator, CLI
+simulation/                Simulation CLI, Python study, requirements
+tests/                     Engine, differential, simulator and Python tests
+build.ps1                  C++ build, test, demo, benchmark targets
+run-simulation.ps1         Single run, simulator tests and full study
+```
+
+## Study and source files
+
+- [Engine interface](include/matching_engine/MatchingEngine.hpp) and [order book](include/matching_engine/OrderBook.hpp)
+- [Simulator configuration](include/market_making/Simulator.hpp) and [implementation](src/MarketMaking.cpp)
+- [Experiment runner and analysis](simulation/run_study.py)
+- [Detailed study guide](docs/STUDY_GUIDE.md)
+- [Implementation and validation notes](docs/IMPLEMENTATION.md)
 
 ---
 
-### 3. Direct Single-Line `g++` Compilation
-
-```powershell
-$env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
-g++ -std=c++20 -O3 -Wall -Wextra -Iinclude src/main.cpp src/OrderBook.cpp src/MatchingEngine.cpp src/ReferenceEngine.cpp -o bin/engine.exe
-.\bin\engine.exe
-```
-
+**Limitations:** simplified synthetic flows, exogenous known reference, discrete simulation grid, priority-reset on quote replacement, simplified background liquidity, no impact or latency calibration, and no claim of profitable live execution.
