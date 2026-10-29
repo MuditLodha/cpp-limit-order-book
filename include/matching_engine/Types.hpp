@@ -77,8 +77,7 @@ enum class RejectReason : uint8_t {
     InvalidQuantity  = 4,
     NoLiquidity      = 5,
     PriceOutOfRange  = 6,
-    CapacityExceeded = 7,
-    InvalidOrderId   = 8
+    CapacityExceeded = 7
 };
 
 // Trade execution event generated on order matching

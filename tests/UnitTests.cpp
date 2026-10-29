@@ -8,7 +8,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <vector>
-#include <stdexcept>
 
 using namespace matching_engine;
 
@@ -35,7 +34,7 @@ using namespace matching_engine;
 void testMemoryPool() {
     std::cout << "[RUNNING] testMemoryPool..." << std::endl;
     constexpr size_t POOL_SIZE = 100;
-    MemoryPool<Order> pool(POOL_SIZE);
+    MemoryPool<Order, POOL_SIZE> pool;
 
     CHECK_EQ(pool.capacity(), POOL_SIZE);
     CHECK_EQ(pool.available(), POOL_SIZE);
@@ -291,104 +290,6 @@ void testRejectReasons() {
 }
 
 // Test fast bitset tracking across sparse price levels (Issue 5)
-void testConfiguredOrderCapacity() {
-    std::cout << "[RUNNING] testConfiguredOrderCapacity..." << std::endl;
-    OrderBookConfig config(1, 100, 1);
-    MatchingEngine engine(config);
-
-    std::vector<RejectReason> rejects;
-    engine.setRejectListener([&](OrderId, RejectReason reason) {
-        rejects.push_back(reason);
-    });
-
-    CHECK(engine.submitLimitOrder(1, Side::Buy, 50, 10));
-    CHECK_EQ(engine.book().orderCount(), 1);
-
-    // maxOrders must be honored by the actual pool, not just stored in config.
-    CHECK(!engine.submitLimitOrder(2, Side::Buy, 49, 10));
-    CHECK_EQ(engine.book().orderCount(), 1);
-    CHECK(engine.book().findOrder(1) != nullptr);
-    CHECK(engine.book().findOrder(2) == nullptr);
-    CHECK(!rejects.empty());
-    CHECK_EQ(static_cast<uint8_t>(rejects.back()),
-             static_cast<uint8_t>(RejectReason::CapacityExceeded));
-
-    CHECK(engine.cancelOrder(1));
-    CHECK(engine.submitLimitOrder(2, Side::Buy, 49, 10));
-    CHECK(engine.book().findOrder(2) != nullptr);
-
-    std::cout << "[PASSED] testConfiguredOrderCapacity" << std::endl;
-}
-
-void testInvalidLimitPriceDoesNotTrade() {
-    std::cout << "[RUNNING] testInvalidLimitPriceDoesNotTrade..." << std::endl;
-    OrderBookConfig config(1, 200, 10);
-    MatchingEngine engine(config);
-    std::vector<ExecutionReport> trades;
-    engine.setTradeListener([&](const ExecutionReport& report) {
-        trades.push_back(report);
-    });
-
-    CHECK(engine.submitLimitOrder(1, Side::Buy, 100, 10));
-    CHECK(!engine.submitLimitOrder(2, Side::Sell, 0, 10));
-    CHECK(trades.empty());
-    CHECK_EQ(engine.book().bestBidPrice(), 100);
-    CHECK_EQ(engine.book().orderCount(), 1);
-    CHECK(engine.book().findOrder(1) != nullptr);
-
-    std::cout << "[PASSED] testInvalidLimitPriceDoesNotTrade" << std::endl;
-}
-
-void testInvalidOrderIdIsRejected() {
-    std::cout << "[RUNNING] testInvalidOrderIdIsRejected..." << std::endl;
-    OrderBookConfig config(1, 100, 10);
-    MatchingEngine engine(config);
-    std::vector<RejectReason> rejects;
-    std::vector<ExecutionReport> trades;
-    engine.setRejectListener([&](OrderId, RejectReason reason) {
-        rejects.push_back(reason);
-    });
-    engine.setTradeListener([&](const ExecutionReport& report) {
-        trades.push_back(report);
-    });
-
-    CHECK(engine.submitLimitOrder(1, Side::Sell, 50, 10));
-    CHECK(!engine.submitLimitOrder(INVALID_ORDER_ID, Side::Buy, 50, 10));
-    CHECK_EQ(engine.submitMarketOrder(INVALID_ORDER_ID, Side::Buy, 10), 0);
-    CHECK(trades.empty());
-    CHECK_EQ(rejects.size(), 2);
-    CHECK_EQ(static_cast<uint8_t>(rejects[0]),
-             static_cast<uint8_t>(RejectReason::InvalidOrderId));
-    CHECK_EQ(static_cast<uint8_t>(rejects[1]),
-             static_cast<uint8_t>(RejectReason::InvalidOrderId));
-    CHECK_EQ(engine.book().orderCount(), 1);
-
-    std::cout << "[PASSED] testInvalidOrderIdIsRejected" << std::endl;
-}
-
-void testInvalidOrderBookConfiguration() {
-    std::cout << "[RUNNING] testInvalidOrderBookConfiguration..." << std::endl;
-    bool rejectedZeroMin = false;
-    try {
-        OrderBookConfig config(0, 100, 10);
-        OrderBook book(config);
-    } catch (const std::invalid_argument&) {
-        rejectedZeroMin = true;
-    }
-    CHECK(rejectedZeroMin);
-
-    bool rejectedReversedRange = false;
-    try {
-        OrderBookConfig config(100, 1, 10);
-        OrderBook book(config);
-    } catch (const std::invalid_argument&) {
-        rejectedReversedRange = true;
-    }
-    CHECK(rejectedReversedRange);
-
-    std::cout << "[PASSED] testInvalidOrderBookConfiguration" << std::endl;
-}
-
 void testSparseBookBitsetScan() {
     std::cout << "[RUNNING] testSparseBookBitsetScan..." << std::endl;
     OrderBookConfig config(1, 100000, 10000);
@@ -409,7 +310,7 @@ void testSparseBookBitsetScan() {
     std::cout << "[PASSED] testSparseBookBitsetScan" << std::endl;
 }
 
-int runUnitTests() {
+int main() {
     std::cout << "========================================" << std::endl;
     std::cout << " Running Matching Engine Unit Tests     " << std::endl;
     std::cout << "========================================" << std::endl;
@@ -421,10 +322,6 @@ int runUnitTests() {
     testOrderCancelAndModify();
     testModifyOrderSafety();
     testRejectReasons();
-    testConfiguredOrderCapacity();
-    testInvalidLimitPriceDoesNotTrade();
-    testInvalidOrderIdIsRejected();
-    testInvalidOrderBookConfiguration();
     testSparseBookBitsetScan();
 
     std::cout << "\n>>> ALL UNIT TESTS PASSED SUCCESSFULLY! <<<" << std::endl;

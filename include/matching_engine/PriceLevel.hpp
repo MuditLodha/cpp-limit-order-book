@@ -41,7 +41,7 @@ public:
      * @brief Add an order to the tail of this price level (FIFO priority).
      */
     void addOrder(Order* order) {
-        assert(order != nullptr);
+        assert(order != NULL);
         orderList_.push_back(order);
         totalVolume_ += order->remainingQuantity;
         ++orderCount_;
@@ -51,7 +51,7 @@ public:
      * @brief Remove an order from this price level (cancel, fill, or modify).
      */
     void removeOrder(Order* order) {
-        assert(order != nullptr);
+        assert(order != NULL);
         assert(totalVolume_ >= order->remainingQuantity);
         assert(orderCount_ > 0);
 

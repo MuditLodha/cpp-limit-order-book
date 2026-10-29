@@ -50,6 +50,7 @@ public:
      * @brief Cancel an active resting order by ID in O(1).
      * @return true if found and canceled, false otherwise.
      */
+    
     bool cancelOrder(OrderId id);
 
     /**
@@ -161,8 +162,8 @@ private:
     // Fast order lookup by OrderId
     std::unordered_map<OrderId, Order*> activeOrders_;
 
-    // Pre-allocated pool; capacity comes from OrderBookConfig::maxOrders
-    MemoryPool<Order> orderPool_;
+    // Memory pool for orders - 1,000,000 orders capacity
+    MemoryPool<Order, 1000000> orderPool_;
 
     // Cached top-of-book prices
     Price bestBidPrice_;

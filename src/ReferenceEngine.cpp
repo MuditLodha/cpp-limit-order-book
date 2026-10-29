@@ -4,7 +4,7 @@
 namespace matching_engine {
 
 bool ReferenceEngine::submitLimitOrder(OrderId id, Side side, Price price, Quantity qty, Timestamp ts) {
-    if (id == INVALID_ORDER_ID || qty == 0 || !isPriceValid(price) || ordersMap_.find(id) != ordersMap_.end()) {
+    if (qty == 0 || !isPriceValid(price) || ordersMap_.find(id) != ordersMap_.end()) {
         return false;
     }
 
@@ -90,7 +90,7 @@ bool ReferenceEngine::submitLimitOrder(OrderId id, Side side, Price price, Quant
 }
 
 Quantity ReferenceEngine::submitMarketOrder(OrderId id, Side side, Quantity qty, Timestamp ts) {
-    if (id == INVALID_ORDER_ID || qty == 0 || ordersMap_.find(id) != ordersMap_.end()) return 0;
+    if (qty == 0 || ordersMap_.find(id) != ordersMap_.end()) return 0;
     Quantity remaining = qty;
 
     if (side == Side::Buy) {

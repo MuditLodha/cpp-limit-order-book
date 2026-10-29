@@ -1,195 +1,131 @@
 #pragma once
 
-#include <cassert>
+#include <vector>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <limits>
-#include <new>
-#include <utility>
-#include <vector>
+#include <cassert>
+#include <cstdlib>   // for std::malloc / std::free
+#include <new>       // for placement new
+#include <utility>   // for std::forward
 
 namespace matching_engine {
 
-// Allocate memory on a 64-byte boundary (or a stricter boundary requested by T).
-// The original pointer is saved immediately before the aligned address so it can
-// be passed back to std::free later.
-inline void* allocateAlignedMemory(size_t size, size_t alignment) {
-    if (size == 0) {
-        return nullptr;
-    }
+// Portable, self-contained 64-byte cache-aligned memory allocator
+// Requires no compiler-specific headers or C++17 dependencies
+inline void* allocateAligned64(size_t size) {
+    const size_t alignment = 64;
+    size_t total = size + alignment + sizeof(void*);
+    void* raw = std::malloc(total);
+    if (!raw) return NULL;
 
-    const size_t pointerSize = sizeof(void*);
-    if (alignment < pointerSize) {
-        alignment = pointerSize;
-    }
+    // Calculate aligned address after reserving space to store the raw pointer
+    uintptr_t rawAddress = reinterpret_cast<uintptr_t>(raw) + sizeof(void*);
+    uintptr_t alignedAddress = (rawAddress + (alignment - 1)) & ~(static_cast<uintptr_t>(alignment - 1));
 
-    if (size > std::numeric_limits<size_t>::max() - alignment - pointerSize) {
-        return nullptr;
-    }
-
-    const size_t totalSize = size + alignment - 1 + pointerSize;
-    void* rawMemory = std::malloc(totalSize);
-    if (rawMemory == nullptr) {
-        return nullptr;
-    }
-
-    const std::uintptr_t rawAddress =
-        reinterpret_cast<std::uintptr_t>(rawMemory) + pointerSize;
-    const std::uintptr_t alignedAddress =
-        (rawAddress + alignment - 1) & ~static_cast<std::uintptr_t>(alignment - 1);
-
-    std::memcpy(reinterpret_cast<void*>(alignedAddress - pointerSize),
-                &rawMemory, sizeof(rawMemory));
+    // Store the original unaligned pointer right before the aligned address
+    *(reinterpret_cast<void**>(alignedAddress) - 1) = raw;
     return reinterpret_cast<void*>(alignedAddress);
 }
 
-inline void freeAlignedMemory(void* alignedMemory) {
-    if (alignedMemory == nullptr) {
-        return;
-    }
-
-    void* rawMemory = nullptr;
-    std::memcpy(&rawMemory,
-                reinterpret_cast<const char*>(alignedMemory) - sizeof(void*),
-                sizeof(rawMemory));
-    std::free(rawMemory);
+inline void freeAligned64(void* ptr) {
+    if (!ptr) return;
+    // Retrieve original raw pointer stored before aligned address
+    void* raw = *(reinterpret_cast<void**>(ptr) - 1);
+    std::free(raw);
 }
 
 /**
- * A fixed-capacity object pool.
+ * @brief High-performance, fixed-capacity object pool allocator.
  *
- * All object storage and free-slot bookkeeping is allocated when the pool is
- * constructed. allocate() and deallocate() then reuse slots in constant time.
+ * Pre-allocates a contiguous memory buffer for objects of type T.
+ * Provides O(1) allocation and deallocation without invoking system malloc
+ * or free on the hot path, eliminating heap fragmentation, OS locks,
+ * and syscall overhead.
+ *
+ * @tparam T Type of object managed by the pool.
+ * @tparam Capacity Maximum number of active objects in the pool.
  */
-template <typename T>
+template <typename T, size_t Capacity>
 class MemoryPool {
 public:
-    explicit MemoryPool(size_t capacity)
-        : storage_(nullptr),
-          capacity_(capacity),
-          freeHead_(capacity),
-          freeSlots_(capacity),
-          slotInUse_(capacity, 0) {
-        if (capacity_ > std::numeric_limits<size_t>::max() / sizeof(T)) {
-            throw std::bad_alloc();
-        }
+    MemoryPool() : storage_(NULL), freeHead_(0) {
+        // Allocate a contiguous, cache-line (64-byte) aligned block of raw memory
+        storage_ = static_cast<char*>(allocateAligned64(Capacity * sizeof(T)));
+        assert(storage_ != NULL && "MemoryPool: aligned allocation failed!");
 
-        if (capacity_ == 0) {
-            return;
+        freeList_.resize(Capacity);
+        for (size_t i = 0; i < Capacity; ++i) {
+            freeList_[i] = Capacity - 1 - i; // LIFO order for cache warmth
         }
-
-        const size_t alignment = alignof(T) > 64 ? alignof(T) : 64;
-        storage_ = static_cast<char*>(
-            allocateAlignedMemory(capacity_ * sizeof(T), alignment));
-        if (storage_ == nullptr) {
-            throw std::bad_alloc();
-        }
-
-        for (size_t i = 0; i < capacity_; ++i) {
-            freeSlots_[i] = capacity_ - 1 - i;
-        }
+        freeHead_ = Capacity;
     }
 
     ~MemoryPool() {
-        reset();
-        freeAlignedMemory(storage_);
+        freeAligned64(storage_);
     }
 
+    // Non-copyable, non-movable for safety
     MemoryPool(const MemoryPool&) = delete;
     MemoryPool& operator=(const MemoryPool&) = delete;
     MemoryPool(MemoryPool&&) = delete;
     MemoryPool& operator=(MemoryPool&&) = delete;
 
+    /**
+     * @brief Allocate and construct an object in-place in O(1).
+     * @return Pointer to constructed object, or NULL if pool exhausted.
+     */
     template <typename... Args>
     T* allocate(Args&&... args) {
         if (freeHead_ == 0) {
-            return nullptr;
+            return NULL; // Pool exhausted
         }
 
-        const size_t index = freeSlots_[--freeHead_];
-        T* object = reinterpret_cast<T*>(storage_ + index * sizeof(T));
-        try {
-            new (object) T(std::forward<Args>(args)...);
-        } catch (...) {
-            freeSlots_[freeHead_++] = index;
-            throw;
-        }
-        slotInUse_[index] = 1;
-        return object;
+        const size_t index = freeList_[--freeHead_];
+        T* ptr = reinterpret_cast<T*>(storage_ + index * sizeof(T));
+        new (ptr) T(std::forward<Args>(args)...);  // Placement new: construct in-place
+        return ptr;
     }
 
-    void deallocate(T* object) {
-        if (object == nullptr) {
-            return;
-        }
+    /**
+     * @brief Destroy object and return its slot to the free list in O(1).
+     */
+    void deallocate(T* ptr) {
+        if (ptr == NULL) return;
 
-        const size_t index = getSlotIndex(object);
-        if (index >= capacity_) {
-            assert(false && "Pointer does not belong to this MemoryPool");
-            return;
-        }
-        if (slotInUse_[index] == 0) {
-            assert(false && "Object was already returned to this MemoryPool");
-            return;
-        }
+        assert(owns(ptr) && "Pointer does not belong to this MemoryPool!");
 
-        object->~T();
-        slotInUse_[index] = 0;
-        freeSlots_[freeHead_++] = index;
+        ptr->~T();  // Explicitly call destructor
+        const size_t index = (reinterpret_cast<const char*>(ptr) - storage_) / sizeof(T);
+        freeList_[freeHead_++] = index;
     }
 
-    bool owns(const T* object) const {
-        if (object == nullptr || storage_ == nullptr) {
-            return false;
-        }
-
-        const std::uintptr_t baseAddress = reinterpret_cast<std::uintptr_t>(storage_);
-        const std::uintptr_t objectAddress = reinterpret_cast<std::uintptr_t>(object);
-        const std::uintptr_t poolEnd = baseAddress + capacity_ * sizeof(T);
-        return objectAddress >= baseAddress && objectAddress < poolEnd &&
-               (objectAddress - baseAddress) % sizeof(T) == 0;
+    /**
+     * @brief Check whether a pointer belongs to this pool's memory region.
+     */
+    bool owns(const T* ptr) const {
+        const char* bytePtr = reinterpret_cast<const char*>(ptr);
+        const char* end     = storage_ + Capacity * sizeof(T);
+        return (bytePtr >= storage_ && bytePtr < end);
     }
 
     size_t available() const { return freeHead_; }
-    size_t capacity() const { return capacity_; }
-    size_t allocatedCount() const { return capacity_ - freeHead_; }
+    size_t capacity()  const { return Capacity; }
+    size_t allocatedCount() const { return Capacity - freeHead_; }
 
-    // Destroy any live objects and make every slot available again.
+    /**
+     * @brief Reset the entire pool, marking all slots as free.
+     */
     void reset() {
-        if (storage_ != nullptr) {
-            for (size_t i = 0; i < capacity_; ++i) {
-                if (slotInUse_[i] != 0) {
-                    T* object = reinterpret_cast<T*>(storage_ + i * sizeof(T));
-                    object->~T();
-                    slotInUse_[i] = 0;
-                }
-            }
+        freeHead_ = Capacity;
+        for (size_t i = 0; i < Capacity; ++i) {
+            freeList_[i] = Capacity - 1 - i;
         }
-
-        for (size_t i = 0; i < capacity_; ++i) {
-            freeSlots_[i] = capacity_ - 1 - i;
-        }
-        freeHead_ = capacity_;
     }
 
 private:
-    size_t getSlotIndex(const T* object) const {
-        if (!owns(object)) {
-            return capacity_;
-        }
-
-        const std::uintptr_t baseAddress = reinterpret_cast<std::uintptr_t>(storage_);
-        const std::uintptr_t objectAddress = reinterpret_cast<std::uintptr_t>(object);
-        return static_cast<size_t>((objectAddress - baseAddress) / sizeof(T));
-    }
-
-    char* storage_;
-    size_t capacity_;
-    size_t freeHead_;
-    std::vector<size_t> freeSlots_;
-    std::vector<unsigned char> slotInUse_;
+    char*               storage_;   // Raw 64-byte-aligned memory block
+    std::vector<size_t> freeList_;  // Stack of free slot indices
+    size_t              freeHead_;  // Top of free-slot stack (number of free slots)
 };
 
 } // namespace matching_engine

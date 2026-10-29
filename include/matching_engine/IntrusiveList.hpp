@@ -18,7 +18,7 @@ struct IntrusiveNode {
     T* prev;
     T* next;
 
-    IntrusiveNode() : prev(nullptr), next(nullptr) {}
+    IntrusiveNode() : prev(NULL), next(NULL) {}
 };
 
 /**
@@ -33,11 +33,11 @@ struct IntrusiveNode {
 template <typename T>
 class IntrusiveList {
 public:
-    IntrusiveList() : head_(nullptr), tail_(nullptr), size_(0) {}
+    IntrusiveList() : head_(NULL), tail_(NULL), size_(0) {}
 
     ~IntrusiveList() {
-        head_ = nullptr;
-        tail_ = nullptr;
+        head_ = NULL;
+        tail_ = NULL;
         size_ = 0;
     }
 
@@ -48,8 +48,8 @@ public:
     // Movable
     IntrusiveList(IntrusiveList&& other)
         : head_(other.head_), tail_(other.tail_), size_(other.size_) {
-        other.head_ = nullptr;
-        other.tail_ = nullptr;
+        other.head_ = NULL;
+        other.tail_ = NULL;
         other.size_ = 0;
     }
 
@@ -59,15 +59,15 @@ public:
             head_ = other.head_;
             tail_ = other.tail_;
             size_ = other.size_;
-            other.head_ = nullptr;
-            other.tail_ = nullptr;
+            other.head_ = NULL;
+            other.tail_ = NULL;
             other.size_ = 0;
         }
         return *this;
     }
 
     bool empty() const {
-        return head_ == nullptr;
+        return head_ == NULL;
     }
 
     size_t size() const {
@@ -94,13 +94,13 @@ public:
      * @brief Append a node to the tail of the list in O(1).
      */
     void push_back(T* node) {
-        assert(node != nullptr);
-        assert(node->prev == nullptr && node->next == nullptr);
+        assert(node != NULL);
+        assert(node->prev == NULL && node->next == NULL);
 
         node->prev = tail_;
-        node->next = nullptr;
+        node->next = NULL;
 
-        if (tail_ != nullptr) {
+        if (tail_ != NULL) {
             tail_->next = node;
         } else {
             head_ = node;
@@ -113,22 +113,22 @@ public:
      * @brief Remove an arbitrary node from the list in O(1).
      */
     void remove(T* node) {
-        assert(node != nullptr);
+        assert(node != NULL);
 
-        if (node->prev != nullptr) {
+        if (node->prev != NULL) {
             node->prev->next = node->next;
         } else if (head_ == node) {
             head_ = node->next;
         }
 
-        if (node->next != nullptr) {
+        if (node->next != NULL) {
             node->next->prev = node->prev;
         } else if (tail_ == node) {
             tail_ = node->prev;
         }
 
-        node->prev = nullptr;
-        node->next = nullptr;
+        node->prev = NULL;
+        node->next = NULL;
         --size_;
     }
 
@@ -137,7 +137,7 @@ public:
      */
     T* pop_front() {
         if (empty()) {
-            return nullptr;
+            return NULL;
         }
         T* node = head_;
         remove(node);
@@ -149,14 +149,14 @@ public:
      */
     void clear() {
         T* curr = head_;
-        while (curr != nullptr) {
+        while (curr != NULL) {
             T* next = curr->next;
-            curr->prev = nullptr;
-            curr->next = nullptr;
+            curr->prev = NULL;
+            curr->next = NULL;
             curr = next;
         }
-        head_ = nullptr;
-        tail_ = nullptr;
+        head_ = NULL;
+        tail_ = NULL;
         size_ = 0;
     }
 
@@ -187,7 +187,7 @@ public:
     };
 
     Iterator begin() { return Iterator(head_); }
-    Iterator end()   { return Iterator(nullptr); }
+    Iterator end()   { return Iterator(NULL); }
 
 private:
     T*     head_;

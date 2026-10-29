@@ -1,26 +1,11 @@
 #include "matching_engine/OrderBook.hpp"
 #include <algorithm>
-#include <stdexcept>
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif
 
 namespace matching_engine {
-
-namespace {
-
-OrderBookConfig validateConfig(const OrderBookConfig& config) {
-    if (config.minPrice == INVALID_PRICE) {
-        throw std::invalid_argument("OrderBookConfig::minPrice must be greater than zero");
-    }
-    if (config.maxPrice < config.minPrice) {
-        throw std::invalid_argument("OrderBookConfig::maxPrice must be >= minPrice");
-    }
-    return config;
-}
-
-} // namespace
 
 // Portable count leading zeros for 64-bit word (word != 0)
 static inline int countLeadingZeros64(uint64_t word) {
@@ -63,10 +48,8 @@ static inline int countTrailingZeros64(uint64_t word) {
 }
 
 OrderBook::OrderBook(const OrderBookConfig& config)
-    : config_(validateConfig(config)),
-      numLevels_(static_cast<size_t>(
-          static_cast<uint64_t>(config_.maxPrice) - config_.minPrice + 1)),
-      orderPool_(config_.maxOrders),
+    : config_(config),
+      numLevels_(config.maxPrice >= config.minPrice ? (config.maxPrice - config.minPrice + 1) : 0),
       bestBidPrice_(INVALID_PRICE),
       bestAskPrice_(INVALID_PRICE) {
     
@@ -89,17 +72,17 @@ OrderBook::~OrderBook() {
 }
 
 Order* OrderBook::addOrder(OrderId id, Price price, Quantity qty, Side side, OrderType type, Timestamp ts) {
-    if (id == INVALID_ORDER_ID || !isPriceValid(price) || qty == 0) {
-        return nullptr;
+    if (!isPriceValid(price) || qty == 0) {
+        return NULL;
     }
 
     if (activeOrders_.find(id) != activeOrders_.end()) {
-        return nullptr; // Duplicate order ID
+        return NULL; // Duplicate order ID
     }
 
     Order* order = orderPool_.allocate(id, price, qty, side, type, ts);
-    if (order == nullptr) {
-        return nullptr; // Out of memory in pre-allocated pool
+    if (order == NULL) {
+        return NULL; // Out of memory in pre-allocated pool
     }
 
     const size_t idx = priceToIndex(price);
@@ -190,7 +173,7 @@ bool OrderBook::modifyOrder(OrderId id, Price newPrice, Quantity newQty, Timesta
     const Side side = order->side;
     const OrderType type = order->type;
     cancelOrder(id);
-    return addOrder(id, newPrice, newQty, side, type, ts) != nullptr;
+    return addOrder(id, newPrice, newQty, side, type, ts) != NULL;
 }
 
 Order* OrderBook::findOrder(OrderId id) const {
@@ -198,11 +181,11 @@ Order* OrderBook::findOrder(OrderId id) const {
     if (it != activeOrders_.end()) {
         return it->second;
     }
-    return nullptr;
+    return NULL;
 }
 
 void OrderBook::removeOrder(Order* order) {
-    if (order == nullptr) return;
+    if (order == NULL) return;
 
     activeOrders_.erase(order->id);
     PriceLevel* level = getLevel(order->side, order->price);
@@ -230,12 +213,12 @@ void OrderBook::removeOrder(Order* order) {
 }
 
 PriceLevel* OrderBook::bestBidLevel() {
-    if (bestBidPrice_ == INVALID_PRICE) return nullptr;
+    if (bestBidPrice_ == INVALID_PRICE) return NULL;
     return &bidLevels_[priceToIndex(bestBidPrice_)];
 }
 
 PriceLevel* OrderBook::bestAskLevel() {
-    if (bestAskPrice_ == INVALID_PRICE) return nullptr;
+    if (bestAskPrice_ == INVALID_PRICE) return NULL;
     return &askLevels_[priceToIndex(bestAskPrice_)];
 }
 

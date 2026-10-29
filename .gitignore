@@ -1,6 +1,5 @@
 # Binaries and build outputs
-/bin/*
-!/bin/README.txt
+bin/
 build/
 *.exe
 *.o
@@ -19,3 +18,8 @@ build/
 # Temporary logs
 *.log
 scratch/
+
+# Generated simulator outputs and Python caches
+results/
+__pycache__/
+*.pyc

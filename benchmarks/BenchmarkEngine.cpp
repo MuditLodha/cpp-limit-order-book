@@ -172,7 +172,7 @@ void benchmarkSustainedThroughput(size_t totalOps = 2000000) {
     }
 }
 
-int runBenchmarks() {
+int main() {
     std::cout << "=======================================================\n";
     std::cout << "  High-Frequency Limit Order Book & Engine Benchmark   \n";
     std::cout << "  Timer: Calibrated CPU RDTSC (Sub-nanosecond accuracy)\n";

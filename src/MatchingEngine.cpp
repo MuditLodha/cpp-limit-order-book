@@ -10,7 +10,7 @@ Quantity MatchingEngine::executeAggressiveMatch(OrderId id, Side side, Price pri
     Quantity remaining = qty;
     while (remaining > 0) {
         Price bestPrice;
-        PriceLevel* level = nullptr;
+        PriceLevel* level = NULL;
 
         if (side == Side::Buy) {
             bestPrice = book_.bestAskPrice();
@@ -26,7 +26,7 @@ Quantity MatchingEngine::executeAggressiveMatch(OrderId id, Side side, Price pri
             level = book_.bestBidLevel();
         }
 
-        if (level == nullptr || level->empty()) {
+        if (level == NULL || level->empty()) {
             break;
         }
 
@@ -59,11 +59,6 @@ Quantity MatchingEngine::executeAggressiveMatch(OrderId id, Side side, Price pri
 }
 
 bool MatchingEngine::submitLimitOrder(OrderId id, Side side, Price price, Quantity qty, Timestamp ts) {
-    if (id == INVALID_ORDER_ID) {
-        if (rejectListener_) rejectListener_(id, RejectReason::InvalidOrderId);
-        return false;
-    }
-
     if (qty == 0) {
         if (rejectListener_) rejectListener_(id, RejectReason::InvalidQuantity);
         return false;
@@ -74,7 +69,7 @@ bool MatchingEngine::submitLimitOrder(OrderId id, Side side, Price price, Quanti
         return false;
     }
 
-    if (book_.findOrder(id) != nullptr) {
+    if (book_.findOrder(id) != NULL) {
         if (rejectListener_) rejectListener_(id, RejectReason::DuplicateOrderId);
         return false;
     }
@@ -84,7 +79,7 @@ bool MatchingEngine::submitLimitOrder(OrderId id, Side side, Price price, Quanti
     // Rest any unfilled remaining quantity
     if (remaining > 0) {
         Order* order = book_.addOrder(id, price, remaining, side, OrderType::Limit, ts);
-        if (order == nullptr) {
+        if (order == NULL) {
             if (rejectListener_) rejectListener_(id, RejectReason::CapacityExceeded);
             return false;
         }
@@ -94,17 +89,12 @@ bool MatchingEngine::submitLimitOrder(OrderId id, Side side, Price price, Quanti
 }
 
 Quantity MatchingEngine::submitMarketOrder(OrderId id, Side side, Quantity qty, Timestamp ts) {
-    if (id == INVALID_ORDER_ID) {
-        if (rejectListener_) rejectListener_(id, RejectReason::InvalidOrderId);
-        return 0;
-    }
-
     if (qty == 0) {
         if (rejectListener_) rejectListener_(id, RejectReason::InvalidQuantity);
         return 0;
     }
 
-    if (book_.findOrder(id) != nullptr) {
+    if (book_.findOrder(id) != NULL) {
         if (rejectListener_) rejectListener_(id, RejectReason::DuplicateOrderId);
         return 0;
     }
@@ -132,7 +122,7 @@ bool MatchingEngine::cancelOrder(OrderId id) {
 
 bool MatchingEngine::modifyOrder(OrderId id, Price newPrice, Quantity newQty, Timestamp ts) {
     Order* existing = book_.findOrder(id);
-    if (existing == nullptr) {
+    if (existing == NULL) {
         if (rejectListener_) rejectListener_(id, RejectReason::OrderNotFound);
         return false;
     }

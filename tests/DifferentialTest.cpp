@@ -19,15 +19,15 @@ using namespace matching_engine;
         } \
     } while (0)
 
-int runDifferentialTest(int argc, char** argv) {
+int main(int argc, char** argv) {
     size_t numOperations = 50000;
     uint32_t seed = 42;
 
-    if (argc > 0) {
-        numOperations = std::stoull(argv[0]);
-    }
     if (argc > 1) {
-        seed = static_cast<uint32_t>(std::stoul(argv[1]));
+        numOperations = std::stoull(argv[1]);
+    }
+    if (argc > 2) {
+        seed = static_cast<uint32_t>(std::stoul(argv[2]));
     }
 
     std::cout << "========================================================\n";

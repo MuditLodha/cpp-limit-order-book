@@ -1,6 +1,5 @@
 #include "matching_engine/MatchingEngine.hpp"
 #include <iostream>
-#include <fstream>
 #include <iomanip>
 #include <string>
 #include <sstream>
@@ -9,61 +8,6 @@
 #include <cctype>
 
 using namespace matching_engine;
-
-// The program's results are written to viewer.txt so the terminal can be used
-// only for entering commands. The original terminal output buffer is kept for
-// the short prompt shown while interactive commands are being entered.
-static std::streambuf* gConsoleOutputBuffer = nullptr;
-
-static void writeToTerminal(const std::string& text) {
-    if (gConsoleOutputBuffer == nullptr) {
-        return;
-    }
-    std::ostream terminal(gConsoleOutputBuffer);
-    terminal << text;
-    terminal.flush();
-}
-
-class ViewerOutputRedirect {
-public:
-    ViewerOutputRedirect()
-        : file_("viewer.txt", std::ios::out | std::ios::trunc),
-          originalCout_(std::cout.rdbuf()),
-          originalCerr_(std::cerr.rdbuf()),
-          active_(false) {
-        gConsoleOutputBuffer = originalCout_;
-        if (file_.is_open()) {
-            std::cout.rdbuf(file_.rdbuf());
-            std::cerr.rdbuf(file_.rdbuf());
-            active_ = true;
-        }
-    }
-
-    ~ViewerOutputRedirect() {
-        flush();
-        if (active_) {
-            std::cout.rdbuf(originalCout_);
-            std::cerr.rdbuf(originalCerr_);
-        }
-        gConsoleOutputBuffer = nullptr;
-    }
-
-    bool isOpen() const {
-        return file_.is_open() && active_;
-    }
-
-    void flush() {
-        std::cout.flush();
-        std::cerr.flush();
-        file_.flush();
-    }
-
-private:
-    std::ofstream file_;
-    std::streambuf* originalCout_;
-    std::streambuf* originalCerr_;
-    bool active_;
-};
 
 // Convert string to lower-case for case-insensitive command matching
 static std::string toLower(std::string str) {
@@ -84,7 +28,6 @@ static const char* rejectReasonToString(RejectReason reason) {
         case RejectReason::NoLiquidity: return "No Liquidity";
         case RejectReason::PriceOutOfRange: return "Price Out of Range";
         case RejectReason::CapacityExceeded: return "Capacity Exceeded";
-        case RejectReason::InvalidOrderId: return "Invalid Order ID";
         default: return "Unknown Reason";
     }
 }
@@ -376,34 +319,19 @@ void runInteractiveSession(MatchingEngine& engine, OrderId& nextAutoId) {
 
     std::string line;
     while (true) {
-        // Keep the input prompt visible in the terminal; command results go
-        // only to viewer.txt.
-        std::cout.flush();
-        std::cerr.flush();
-        writeToTerminal("lob> ");
-
+        std::cout << "lob> ";
         if (!std::getline(std::cin, line)) {
             break;
-        }
-        if (!line.empty()) {
-            std::cout << "\nCOMMAND> " << line << "\n";
-            std::cout.flush();
         }
         auto tokens = tokenize(line);
         if (!processCommand(engine, tokens, nextAutoId)) {
             std::cout << "Exiting trading terminal. Goodbye!\n";
-            std::cout.flush();
             break;
         }
-
-        // Flush after every command so viewer.txt stays current while the
-        // interactive session is running.
-        std::cout.flush();
-        std::cerr.flush();
     }
 }
 
-int runEngineCli(int argc, char* argv[]) {
+int main(int argc, char* argv[]) {
     // 1. Initialize matching engine configuration
     OrderBookConfig config(1, 100000, 1000000);
     MatchingEngine engine(config);
@@ -467,90 +395,4 @@ int runEngineCli(int argc, char* argv[]) {
     }
 
     return 0;
-}
-
-
-// These functions are implemented in their respective source files.
-int runUnitTests();
-int runDifferentialTest(int argc, char** argv);
-int runBenchmarks();
-
-static void printProgramHelp(const char* programName) {
-    std::cout << "Limit Order Book & Matching Engine\n\n"
-              << "Usage:\n"
-              << "  " << programName << "                 Start interactive trading mode\n"
-              << "  " << programName << " demo            Run the guided demo\n"
-              << "  " << programName << " test            Run unit tests\n"
-              << "  " << programName << " diff [ops] [seed]  Run differential tests (default: 25000 42)\n"
-              << "  " << programName << " bench           Run performance benchmarks\n"
-              << "  " << programName << " help            Show this help\n\n"
-              << "Trading commands can also be passed directly, for example:\n"
-              << "  " << programName << " limit buy 100 50 101\n"
-              << "  " << programName << " market sell 20 201\n"
-              << "  " << programName << " book 10\n"
-              << "  " << programName << " cancel 101\n\n"
-              << "To run multiple trading commands in one session, start the program with no arguments.\n";
-}
-
-static int runProgram(int argc, char* argv[]) {
-    if (argc <= 1) {
-        return runEngineCli(argc, argv);
-    }
-
-    const std::string mode = toLower(argv[1]);
-
-    if (mode == "test") {
-        return runUnitTests();
-    }
-
-    if (mode == "diff") {
-        if (argc == 2) {
-            char defaultOperations[] = "25000";
-            char defaultSeed[] = "42";
-            char* defaultArgs[] = { defaultOperations, defaultSeed };
-            return runDifferentialTest(2, defaultArgs);
-        }
-        return runDifferentialTest(argc - 2, argv + 2);
-    }
-
-    if (mode == "bench") {
-        return runBenchmarks();
-    }
-
-    if (mode == "--help" || mode == "-h" || mode == "help") {
-        printProgramHelp(argv[0]);
-        return 0;
-    }
-
-    // If the first argument isn't a program mode, treat all arguments as a
-    // normal trading command, such as: lob.exe limit buy 100 50 101.
-    return runEngineCli(argc, argv);
-}
-
-
-int main(int argc, char* argv[]) {
-    ViewerOutputRedirect output;
-    if (!output.isOpen()) {
-        writeToTerminal("[ERROR] Could not create viewer.txt in the current folder.\n");
-        return 1;
-    }
-
-    writeToTerminal("Program output is going to viewer.txt.\n");
-    if (argc <= 1 || (argc >= 2 &&
-        (toLower(argv[1]) == "interactive" || toLower(argv[1]) == "-i" ||
-         toLower(argv[1]) == "--interactive"))) {
-        writeToTerminal("Enter trading commands here; responses will appear in viewer.txt.\n\n");
-    }
-
-    const int result = runProgram(argc, argv);
-    output.flush();
-
-    if (argc <= 1 || (argc >= 2 &&
-        (toLower(argv[1]) == "interactive" || toLower(argv[1]) == "-i" ||
-         toLower(argv[1]) == "--interactive"))) {
-        writeToTerminal("\nTrading session ended. Final output is in viewer.txt.\n");
-    } else {
-        writeToTerminal("Finished. Results are in viewer.txt.\n");
-    }
-    return result;
 }
