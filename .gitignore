@@ -23,3 +23,8 @@ scratch/
 results/
 __pycache__/
 *.pyc
+
+/results/study/
+
+/docs/IMPLEMENTATION.md
+/docs/STUDY_GUIDE.md

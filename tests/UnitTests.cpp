@@ -113,6 +113,16 @@ void testPriceTimePriorityFIFO() {
     MatchingEngine engine(config);
 
     std::vector<ExecutionReport> trades;
+    // Register a callback: whenever the engine executes a trade,
+    // it calls this lambda and passes the ExecutionReport.
+    //
+    // [&] captures surrounding variables by reference, so we can modify
+    // the original 'trades' vector declared outside the lambda.
+    //
+    // const ExecutionReport& avoids copying the report into the function.
+    // push_back copies the report into the vector for later inspection.
+    //
+    // This lambda does NOT run immediately; it runs when a trade executes.
     engine.setTradeListener([&](const ExecutionReport& report) {
         trades.push_back(report);
     });

@@ -15,6 +15,10 @@ namespace matching_engine {
  * node allocations.
  */
 struct alignas(64) Order : public IntrusiveNode<Order> {
+    // alignas(64) tells C++
+    // that each Order requires 64-byte alignment. It also makes sizeof(Order) a multiple of 64.
+    // like a order of 49 bytes will also have 64 bytes 
+    // if 69 then it will be 128 bytes.
     OrderId   id;
     Price     price;
     Quantity  initialQuantity;

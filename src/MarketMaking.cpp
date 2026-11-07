@@ -33,7 +33,7 @@ void Config::validate() const {
         makerFee, takerFee, markoutHorizon, initialCapital
     };
     for (double value : numericParameters) {
-        if (!std::isfinite(value)) {
+        if (!std::isfinite(value)) { // remove NaN and Inf
             throw std::invalid_argument("All numeric inputs must be finite");
         }
     }
@@ -69,9 +69,13 @@ Quote makeQuote(const Config& config, double referencePrice, int inventory, doub
     }
     if (config.strategy == Strategy::AvellanedaStoikov) {
         // Inspired by A-S quoting; fills are not calibrated to its intensity law.
+        // riskHorizon is the expected time we hope to hold the current inventory
+        // if riskHorizon is too small (the values will not change much) so low riskTerm
         const double riskHorizon = std::min(config.riskHorizon, std::max(0.0, secondsRemaining));
         const double inventoryRiskTerm = config.gamma * config.sigma * config.sigma * riskHorizon;
+        // if I’m holding inventory, price could move against me, so I want to get flat.
         quoteCenter -= inventory * inventoryRiskTerm;
+        // Widens the spread by half the risk term, since you want more compensation when things are riskier.
         quoteHalfSpread = 0.5 * inventoryRiskTerm +
                           std::log1p(config.gamma / config.kappa) / config.gamma;
     }
@@ -82,14 +86,14 @@ Quote makeQuote(const Config& config, double referencePrice, int inventory, doub
     }
 
     return {
-        static_cast<int>(std::floor(quoteCenter - quoteHalfSpread)),
-        static_cast<int>(std::ceil(quoteCenter + quoteHalfSpread)),
-        std::max(0, std::min(config.quoteSize, config.inventoryLimit - inventory)),
-        std::max(0, std::min(config.quoteSize, config.inventoryLimit + inventory))
+        static_cast<int>(std::floor(quoteCenter - quoteHalfSpread)), // bid
+        static_cast<int>(std::ceil(quoteCenter + quoteHalfSpread)), // ask
+        std::max(0, std::min(config.quoteSize, config.inventoryLimit - inventory)), // buySize
+        std::max(0, std::min(config.quoteSize, config.inventoryLimit + inventory)) // sellSize
     };
 }
 
-std::vector<Tick> generateTape(const Config& config) {
+std::vector<Tick> generateTape(const Config& config) { // list of ticks, each with a price innovation and a list of incoming orders
     config.validate();
     std::mt19937_64 priceGenerator(config.seed);
     std::mt19937_64 orderFlowGenerator(config.seed ^ 0x9e3779b97f4a7c15ULL);
@@ -100,19 +104,22 @@ std::vector<Tick> generateTape(const Config& config) {
     std::uniform_real_distribution<double> randomProbability(0, 1);
 
     const size_t stepCount = static_cast<size_t>(std::llround(config.seconds / config.dt));
-    std::vector<Tick> marketTape;
+    std::vector<Tick> marketTape; // tick comprises a price innovation (reference price change in this time step) and a list of incoming orders in this timestamp
     marketTape.reserve(stepCount);
 
     for (size_t stepIndex = 0; stepIndex < stepCount; ++stepIndex) {
         Tick currentTick{config.sigma * std::sqrt(config.dt) * normalPriceChange(priceGenerator), {}};
-        const int arrivalCount = orderArrivals(orderFlowGenerator);
+        const int arrivalCount = orderArrivals(orderFlowGenerator); // poisson arrivals
 
         for (int orderIndex = 0; orderIndex < arrivalCount; ++orderIndex) {
             // Use the same random tape when comparing different strategies.
-            const bool isInformed = randomProbability(orderFlowGenerator) < config.informedFraction;
-            const bool randomBuy = randomProbability(orderFlowGenerator) < 0.5;
-            const bool isBuy = isInformed && currentTick.innovation != 0
+            const bool isInformed = randomProbability(orderFlowGenerator) < config.informedFraction; // already know about price movement
+            const bool randomBuy = randomProbability(orderFlowGenerator) < 0.5; // used for cases when not informed
+            const bool isBuy = isInformed && currentTick.innovation != 0 // if price is moving up (when informed) or randomBuy is true when not informed
                 ? currentTick.innovation > 0 : randomBuy;
+            //Tolerance: how far past the reference price the order is willing to trade. In run(), a buyer’s limit price is
+            // reference + tolerance and a seller’s is reference - tolerance.
+            // Higher tolerance means the order is more likely to reach the market maker’s quotes.
             currentTick.orders.push_back({isBuy ? Side::Buy : Side::Sell, 1 + std::min(orderSize(orderFlowGenerator), 100000), priceTolerance(orderFlowGenerator), isInformed});
         }
         marketTape.push_back(std::move(currentTick));
@@ -153,11 +160,12 @@ Result run(const Config& config, const std::vector<Tick>& marketTape) {
     OrderId nextOrderId = 1;
     OrderId bidOrderId = 0;
     OrderId askOrderId = 0;
-    OrderId liquidationOrderId = 0;
+    OrderId liquidationOrderId = 0; // the order id of the last order before closing everthing
+    // its a taker order because it doesnt add liquidity(rest in the book) it is a market order
     std::vector<OrderId> backgroundOrderIds;
     double referencePrice = config.initialPrice;
     double currentTime = 0;
-    bool isLiquidating = false;
+    bool isLiquidating = false; // is this the last order ?
 
     matchingEngine.setRejectListener([](OrderId, RejectReason reason) {
         if (reason != RejectReason::NoLiquidity) {
@@ -227,6 +235,7 @@ Result run(const Config& config, const std::vector<Tick>& marketTape) {
     for (size_t stepIndex = 0; stepIndex < stepCount; ++stepIndex) {
         currentTime = stepIndex * config.dt;
         cancelCurrentQuotes();
+        // it dont changes the market tape , it is just changing the orders which are already resting in the order book
         refreshBackgroundLiquidity(); // Background orders have FIFO priority at identical prices.
 
         Quote quote = makeQuote(config, referencePrice, account.inventory, config.seconds - currentTime);
