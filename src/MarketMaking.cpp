@@ -146,6 +146,9 @@ Result run(const Config& config) {
     return run(config, generateTape(config));
 }
 
+// we first make background orders which are already resting in the order book, then we make our own
+// order (here we are making such that it do not match with any of the background orders) 
+// and then we process the incoming flow of orders in the market tape
 Result run(const Config& config, const std::vector<Tick>& marketTape) {
     config.validate();
     const size_t stepCount = static_cast<size_t>(std::llround(config.seconds / config.dt));

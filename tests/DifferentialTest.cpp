@@ -60,17 +60,19 @@ int main(int argc, char** argv) {
     std::uniform_int_distribution<Quantity> validQtyDist(1, 50);
 
     // Generators for fuzzing invalid / edge-case inputs (Bugs 2 & 3 regression tests)
-    std::uniform_int_distribution<int> fuzzDist(0, 99);
+    // fuzzDist decides whether we should deliberately generate an invalid input.
+    // invalidPriceDist generates prices above the allowed maximum of 200.
     std::uniform_int_distribution<Price> invalidPriceDist(201, 300); // Beyond MAX_PRICE
+    std::uniform_int_distribution<int> fuzzDist(0, 99);
 
-    std::vector<OrderId> activeOrderIds;
+    std::vector<OrderId> activeOrderIds; // ids that were added to the book
     OrderId nextOrderId = 1;
 
     for (size_t i = 1; i <= numOperations; ++i) {
         fastTrades.clear();
         refTrades.clear();
 
-        const int op = opDist(rng);
+        const int op = opDist(rng); // to choose what type of order to place
         const Side side = (sideDist(rng) == 0) ? Side::Buy : Side::Sell;
         const Timestamp ts = static_cast<Timestamp>(i);
         const int fuzzChance = fuzzDist(rng);
@@ -80,7 +82,11 @@ int main(int argc, char** argv) {
             OrderId id = nextOrderId++;
             Price price;
             Quantity qty;
-
+            // fuzzchance < 3: invalid price 0
+            // fuzzchance < 6: invalid price > MAX_PRICE
+            // fuzzchance < 8: invalid qty 0
+            // fuzzchance < 10: duplicate order ID
+            // else: valid price and qty
             if (fuzzChance < 3) {
                 price = 0; // Invalid price 0
                 qty = validQtyDist(rng);
@@ -109,6 +115,8 @@ int main(int argc, char** argv) {
             }
         } else if (op < 70) {
             // Market Order (with ~5% qty 0 or duplicate IDs)
+            // fuzzChance < 5: invalid qty 0
+            // else: valid qty
             OrderId id = nextOrderId++;
             Quantity qty = (fuzzChance < 5) ? 0 : validQtyDist(rng);
 
@@ -118,6 +126,7 @@ int main(int argc, char** argv) {
         } else if (op < 85) {
             // Cancel Order (with ~10% cancellations of dead/non-existent IDs)
             OrderId id;
+            // fuzzChance < 10: cancel non-existent order ID
             if (fuzzChance < 10 || activeOrderIds.empty()) {
                 id = 999999999ULL + (rng() % 1000); // Dead ID
                 bool fCancel = fastEngine.cancelOrder(id);
