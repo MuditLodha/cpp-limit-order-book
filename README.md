@@ -112,4 +112,4 @@ build.ps1                  Engine build and test script
 run-simulation.ps1         Simulation runner
 ~~~
 
-For implementation details and the simulation model, see [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) and [STUDY_GUIDE.md](docs/STUDY_GUIDE.md).
+
